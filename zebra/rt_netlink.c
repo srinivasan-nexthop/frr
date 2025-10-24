@@ -453,6 +453,9 @@ parse_encap_seg6local(struct rtattr *tb,
 		ctx->nh6 = *(struct in6_addr *)RTA_DATA(
 				tb_encap[SEG6_LOCAL_NH6]);
 
+	if (tb_encap[SEG6_LOCAL_OIF])
+		ctx->ifindex = *(uint32_t *)RTA_DATA(tb_encap[SEG6_LOCAL_OIF]);
+
 	if (tb_encap[SEG6_LOCAL_TABLE])
 		ctx->table = *(uint32_t *)RTA_DATA(tb_encap[SEG6_LOCAL_TABLE]);
 
@@ -1969,6 +1972,9 @@ static bool _netlink_route_build_singlepath(const struct prefix *p,
 				if (!nl_attr_put(nlmsg, req_size,
 						 SEG6_LOCAL_NH6, &ctx->nh6,
 						 sizeof(struct in6_addr)))
+					return false;
+				if (!nl_attr_put32(nlmsg, req_size,
+						   SEG6_LOCAL_OIF, ctx->ifindex))
 					return false;
 				break;
 			case ZEBRA_SEG6_LOCAL_ACTION_END_T:
