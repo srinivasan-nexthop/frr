@@ -79,3 +79,26 @@ patch(es) into `sonic-frr/patch`.
   bumping `AFI_MAX` 4→5 and `SAFI_MAX` 8→9 — the collision point with our
   own `SAFI_SRPOLICY = 8` addition will surface in Stage B, not here
   (Stage A is pure-upstream, no SONiC patches involved yet).
+
+## Progress checkpoint (19/56 "touches-existing" commits landed)
+
+Commits 4-19 (`a98f8055d2` debug support, `c85fff38ea` linkstate-db
+registration, `abccc10524` capability display, `50e92bbb7f` AFI/SAFI
+negotiation — all clean; `5a49df37f5` error code, `c8acf7a2c7` attr
+struct, `31cffad03f` update/withdraw, `88ced6ec9e` opaque messages,
+`5ccafe4b1c` show commands, `bfb67d5364` UPDATE packet encoding — all
+hand-resolved) landed. Full per-commit detail in each commit's own
+message body (`(Stage A: ...)` trailer) rather than duplicated here —
+`git log` on this branch is the source of truth going forward; this
+file now tracks only the scope-verification methodology and overall
+checkpoints.
+
+`bfb67d5364` ("Encode BGP-LS NLRI and attribute when building UPDATE
+packet") was the largest/hardest so far: 3 function-signature changes
+(`bgp_packet_mpattr_prefix`/`bgp_packet_attribute`/
+`bgp_packet_mpunreach_prefix`, all gaining a `ls_nlri` parameter)
+propagated across all 4 files that call them, with our 10.5.4 tree's
+narrower `bgp_packet_attribute()` signature (missing the later
+`srv6_unicast` param) requiring independent arg-count verification at
+each call site rather than literally copying the diff's argument
+lists. 37 of 56 "touches-existing" commits remain.
