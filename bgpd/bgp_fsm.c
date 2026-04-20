@@ -42,6 +42,7 @@
 #include "bgpd/bgp_io.h"
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_vty.h"
+#include "bgpd/bgp_ls.h"
 
 DEFINE_HOOK(peer_backward_transition, (struct peer * peer), (peer));
 DEFINE_HOOK(peer_status_changed, (struct peer * peer), (peer));
@@ -1757,6 +1758,12 @@ enum bgp_fsm_state_progress bgp_stop(struct peer_connection *connection)
 				   bgp_peer_get_connection_direction(connection));
 		update_group_remove_peer_afs(peer);
 
+		/* Withdraw Link NLRI for BGP session (local -> peer) */
+		if (bgp && bgp->ls_info && bgp->ls_info->enable_distribution)
+			if (bgp_ls_withdraw_bgp_link(bgp, peer) != 0)
+				zlog_warn("BGP-LS: Failed to withdraw link NLRI for peer %s",
+					  peer->host);
+
 		/* Reset peer synctime */
 		peer->synctime = 0;
 	}
@@ -2518,6 +2525,11 @@ bgp_establish(struct peer_connection *connection)
 				SET_FLAG(peer->af_sflags[afi][safi],
 					 PEER_STATUS_ORF_WAIT_REFRESH);
 	}
+
+	/* Generate Link NLRI for BGP session (local -> peer) */
+	if (bgp && bgp->ls_info && bgp->ls_info->enable_distribution)
+		if (bgp_ls_originate_bgp_link(bgp, peer) != 0)
+			zlog_warn("BGP-LS: Failed to originate link NLRI for peer %s", peer->host);
 
 	bgp_announce_peer(peer);
 
