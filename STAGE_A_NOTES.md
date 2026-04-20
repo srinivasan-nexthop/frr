@@ -102,3 +102,27 @@ narrower `bgp_packet_attribute()` signature (missing the later
 `srv6_unicast` param) requiring independent arg-count verification at
 each call site rather than literally copying the diff's argument
 lists. 37 of 56 "touches-existing" commits remain.
+
+## Progress checkpoint 2 (28/56 -- halfway)
+
+Commits 20-28 landed: `aa7c9b97f2` (receive attribute), `1da3f4420c`
+(parse NLRI), `399c64b834` (peer-AF-based nexthop selection --
+PEER_FLAG_BGP_LS_IPV4/IPV6, hand-resolved across bgp_attr.c/
+bgp_updgrp.c/bgpd.c/bgpd.h; caught a mis-scoped edit where the same
+nexthop-AFI-selection pattern appears twice in bgp_attr.c, once in the
+real target function and once in the unrelated bgp_packet_nhc()),
+`f232a7fbd1` (opaque msg demote, clean), `a2576fd6b0` (JSON attr
+display), `a8b23e3df8` (extended length, clean), `906445760f` (TED
+reset on deactivation), `46197ca940` (BGP-only-fabric originate/
+withdraw fns -- bgpd.h only, bgp_ls.c/h already covered by verbatim
+copy), `e2532aef6e` (27 call-site insertions for prefix originate/
+withdraw on route events -- split into 28 individual hunks and applied
+independently, 26 clean, 1 real hand-fix, 1 header-only split artifact).
+
+Useful technique validated: for large multi-hunk single-file commits,
+splitting the diff into individual per-hunk files and `git apply`-ing
+each independently (rather than relying on git's whole-file atomicity)
+surfaces exactly which hunks need hand attention, often much fewer
+than the total hunk count. Will reuse for remaining large commits.
+
+28 of 56 "touches-existing" commits remain.
