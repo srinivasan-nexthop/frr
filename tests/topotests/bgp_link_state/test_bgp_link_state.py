@@ -3,7 +3,7 @@
 #
 # Copyright (c) 2025 by Carmine Scarpitta
 #
-"""
+r"""
 Test BGP Link-State (RFC 9552) functionality:
 - BGP-LS capability negotiation
 - Producer mode: Export IGP topology to BGP-LS
