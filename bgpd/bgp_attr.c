@@ -3962,7 +3962,12 @@ static enum bgp_attr_parse_ret bgp_attr_ls(struct bgp_attr_parser_args *args)
 	ret = bgp_ls_parse_attr(connection->curr, args->length, ls_attr);
 	if (ret != 0) {
 		bgp_ls_attr_free(ls_attr);
-		return BGP_ATTR_PARSE_ERROR;
+		/*
+		 * RFC 9552 §5.1 + RFC 7606 §5.4: a malformed BGP-LS TLV
+		 * requires NLRI discard (treat-as-withdraw) while the BGP
+		 * session itself continues.
+		 */
+		return BGP_ATTR_PARSE_WITHDRAW;
 	}
 
 	attr->ls_attr = bgp_ls_attr_intern(ls_attr);
