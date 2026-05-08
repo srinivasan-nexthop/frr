@@ -9992,12 +9992,11 @@ DEFPY(aggregate_addressv6, aggregate_addressv6_cmd,
 }
 
 /* Redistribute route treatment. */
-void bgp_redistribute_add(struct bgp *bgp, struct prefix *p,
-			  const union g_addr *nexthop, ifindex_t ifindex,
-			  enum nexthop_types_t nhtype, uint8_t distance,
-			  enum blackhole_type bhtype, uint32_t metric,
-			  uint8_t type, unsigned short instance,
-			  route_tag_t tag)
+void bgp_redistribute_add(struct bgp *bgp, struct prefix *p, const union g_addr *nexthop,
+			  ifindex_t ifindex, enum nexthop_types_t nhtype, uint8_t distance,
+			  enum blackhole_type bhtype, uint32_t metric, uint8_t type,
+			  unsigned short instance, route_tag_t tag, uint32_t seg6local_action,
+			  const struct seg6local_context *seg6local_ctx)
 {
 	struct bgp_path_info *new;
 	struct bgp_path_info *bpi;
@@ -10079,6 +10078,9 @@ void bgp_redistribute_add(struct bgp *bgp, struct prefix *p,
 	attr.tag = tag;
 
 	afi = family2afi(p->family);
+
+	/* Handle BGP-LS concerns including SRv6 localsid updates */
+	bgp_ls_handle_route_add(bgp, p, afi, type, instance, seg6local_action, seg6local_ctx);
 
 	red = bgp_redist_lookup(bgp, afi, type, instance);
 	if (red) {
@@ -10211,6 +10213,9 @@ void bgp_redistribute_delete(struct bgp *bgp, struct prefix *p, uint8_t type,
 	struct bgp_redist *red;
 
 	afi = family2afi(p->family);
+
+	/* Handle BGP-LS concerns including SRv6 localsid updates */
+	bgp_ls_handle_route_delete(bgp, p, afi, type, instance);
 
 	red = bgp_redist_lookup(bgp, afi, type, instance);
 	if (red) {

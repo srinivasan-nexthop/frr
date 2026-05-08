@@ -494,6 +494,8 @@ static int zebra_read_route(ZAPI_CALLBACK_ARGS)
 	struct zapi_route api;
 	union g_addr nexthop = {};
 	ifindex_t ifindex;
+	uint32_t seg6local_action = ZEBRA_SEG6_LOCAL_ACTION_UNSPEC;
+	const struct seg6local_context *seg6local_ctx = NULL;
 	int add, i;
 	struct bgp *bgp;
 
@@ -523,6 +525,9 @@ static int zebra_read_route(ZAPI_CALLBACK_ARGS)
 	} else
 		nexthop = api.nexthops[0].gate;
 
+	seg6local_action = api.nexthops[0].seg6local_action;
+	seg6local_ctx = &api.nexthops[0].seg6local_ctx;
+
 	add = (cmd == ZEBRA_REDISTRIBUTE_ROUTE_ADD);
 	if (add) {
 		/*
@@ -541,9 +546,9 @@ static int zebra_read_route(ZAPI_CALLBACK_ARGS)
 		}
 
 		/* Now perform the add/update. */
-		bgp_redistribute_add(bgp, &api.prefix, &nexthop, ifindex,
-				     nhtype, api.distance, bhtype, api.metric,
-				     api.type, api.instance, api.tag);
+		bgp_redistribute_add(bgp, &api.prefix, &nexthop, ifindex, nhtype, api.distance,
+				     bhtype, api.metric, api.type, api.instance, api.tag,
+				     seg6local_action, seg6local_ctx);
 	} else {
 		bgp_redistribute_delete(bgp, &api.prefix, api.type,
 					api.instance);
