@@ -126,3 +126,36 @@ surfaces exactly which hunks need hand attention, often much fewer
 than the total hunk count. Will reuse for remaining large commits.
 
 28 of 56 "touches-existing" commits remain.
+
+## Progress checkpoint 3
+
+Commits 29-33 landed: `a6d9b870...` (clean), `11d9d690a3` (bgpd:
+trigger BGP-LS link originate/withdraw on peer state events --
+bgp_fsm.c, `bgp`/`bgp_ls_originate_bgp_link`/`bgp_ls_withdraw_bgp_link`
+already in scope via verbatim bgp_ls.c), `e15218968f` (bgpd: CLI to
+enable BGP-LS distribution for BGP-only fabrics -- bgp_vty.c, 4
+hand-applied hunks: include, 2 new DEFPYs, config-write block, 2
+install_element registrations; anchors found by content search since
+line numbers diverge heavily from a 10.7.0-era diff), `179984048...`
+and `0f897...` (both clean).
+
+**Deliberate exclusion**: `6677220e92` ("bgpd: Modify functions to
+use `struct peer_connection`") -- a 13-file mechanical refactor
+(bgp_attr.c/h, bgp_bmp.c, bgp_evpn.c, bgp_fsm.c, bgp_io.c, bgp_open.c/h,
+bgp_packet.c/h, bgp_routemap.c, bgp_vty.c, bgpd.c, plus bgp_ls.c)
+converting a batch of BGP OPEN/capability-negotiation/packet-write
+functions from taking `struct peer *` to `struct peer_connection *`.
+Verified via grep that none of `bgp_ls.c`/`bgp_ls_nlri.c`/
+`bgp_ls_ted.c` call any of the refactored function names -- the
+commit's only bgp_ls.c hunk is a purely-internal helper-signature
+simplification (`bgp_ls_get_ifp_from_connection`) already present
+verbatim via the commit-1 file copy from the 10.7.0 tag. This commit
+carries zero BGP-LS feature semantics; it only appeared in the
+163-commit set because it happens to touch bgp_ls.c incidentally.
+Replaying the other 12 files' mechanical signature churn would add
+large unrelated risk for zero functional gain, so it is skipped
+outright (not deferred -- unlike the test/doc commits, there is
+nothing here to revisit later). Queue popped without a Stage A
+commit.
+
+25 of 56 "touches-existing" commits remain.
