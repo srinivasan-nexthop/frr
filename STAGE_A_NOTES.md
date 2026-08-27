@@ -228,3 +228,46 @@ revisit with the user before considering Stage A fully done. Stage B
 (export as a few logical patches, apply onto the 156-SONiC-patch
 branch, resolve the SAFI_BGP_LS=8/SAFI_SRPOLICY=8 collision) has not
 started.
+
+## Progress checkpoint 6 -- deferred test/doc commits landed, Stage A complete
+
+All 17 previously-deferred commits (15 test-only + 2 doc-only) applied
+via a full (unscoped) `git apply` each -- zero conflicts, since none
+of them touch any pre-existing file outside `doc/user/bgp.rst` (a
+2-line toctree addition) and the topotest tree they create is entirely
+new. Applied in upstream chronological order via a dedicated queue
+script (`testdoc_integrate.sh`), separate from the main
+`stageA_integrate.sh` used for the 56 touches-existing commits.
+
+**Stage A is now fully complete**: 74 commits on `bgpls-on-10.5.4-stageA`
+on top of pristine `frr-10.5.4` -- 1 verbatim-copy commit (6 new
+bgp_ls*.c/h files, subsuming 90 new-file-only commits), 53 individually
+replayed touches-existing commits (29 clean via `git apply`, 24
+hand-resolved), 3 deliberately excluded touches-existing commits
+(zero BGP-LS payload, documented above), 17 test/doc commits (all
+clean), and 3 bookkeeping commits (this file). All 163 genuine
+upstream BGP-LS commits are accounted for.
+
+A full commit-by-commit report -- classification, every hand-resolved
+conflict and its resolution, the 3 exclusions, and a risk assessment
+ahead of Stage B -- was written up separately as
+`bgpls_stageA_ledger.html` (published as an artifact, not stored in
+this worktree).
+
+**Known open risks before Stage B** (see the ledger for full detail):
+this branch has never been compiled -- no `configure`/`make` pass has
+been run, so no hand resolution has been verified by anything stronger
+than anchor/context matching and brace-balance checks. The
+`SAFI_BGP_LS=8` / `SAFI_SRPOLICY=8` collision is confirmed on both
+sides (checked directly against `src/sonic-frr/frr/lib/zebra.h`) and
+unresolved. Commit `baa1dcadd2` is a deliberate structural deviation
+from upstream (kept `ls_attr` as a direct `attr` field instead of
+moving it into `attr_extra`, since the `attr_extra` infrastructure
+commit was excluded) -- functionally fine today, but a documented
+divergence. Peer-flag bit reassignments (34/35, 47/48) need
+cross-checking against the 156-patch SONiC/Nexthop branch before
+Stage B, same as the SAFI collision.
+
+Stage B (export as a few logical patches, apply onto the branch
+carrying the 156 SONiC/Nexthop patches, resolve the collisions above)
+has not started.
