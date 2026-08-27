@@ -271,3 +271,34 @@ Stage B, same as the SAFI collision.
 Stage B (export as a few logical patches, apply onto the branch
 carrying the 156 SONiC/Nexthop patches, resolve the collisions above)
 has not started.
+
+## Progress checkpoint 7 -- test-coverage audit, 1 gap found and fixed
+
+Prompted by a direct question ("have you brought on all the tests
+too"), audited all 56 touches-existing commits for any bundled
+`tests/`/`doc/` files that Stage A's scoped-diff process (which
+deliberately excludes those paths, to keep the code-only integration
+pass and the test/doc pass separate) would have silently dropped.
+
+Found 1 real gap: `314b3eb5e6` ("*: Add BGP-LS AFI/SAFI constants",
+replayed here as `0fd35f4a27`) bundled a 2-line unit-test hunk in
+`tests/bgpd/test_peer_attr.c` (`case AFI_BGP_LS: return "bgp-ls";` in
+`str_from_afi()`) alongside its 17 production files. Fixed as a new
+follow-up commit (`ca7dfd9227`) rather than amending `0fd35f4a27`,
+since that commit is buried under 70+ later commits.
+
+The other touches-existing commit with bundled test files
+(`6677220e92`, already excluded) touches `tests/bgpd/test_aspath.c`
+and `tests/bgpd/test_capability.c`, but those are mechanical call-site
+updates for the peer_connection refactor that was itself excluded --
+applying them would break compilation against our un-refactored
+function signatures, so correctly left out, not a gap.
+
+Independently verified via `git log -G'AFI_BGP_LS|SAFI_BGP_LS|BGP-LS|
+BGP_LS|bgp_link_state' -- tests/` and the `doc/` equivalent across the
+full `frr-10.5.4..frr-10.7.0` range (not just the original 164-commit
+candidate list) that no other BGP-LS-referencing test or doc content
+exists anywhere in the range beyond what's now landed. **Test/doc
+coverage is confirmed complete**: all 15 topotest commits, both doc
+commits, and this 1 recovered unit-test hunk are now in the branch
+(76 total commits).
