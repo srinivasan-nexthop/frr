@@ -371,3 +371,92 @@ branch remain open, unchanged, ahead of Stage B.
 runtime/protocol-correctness verification -- the topotest suite has
 still not been *executed* (no BGP sessions have actually been brought
 up and exchanged BGP-LS NLRIs). That remains open.
+
+## Progress checkpoint 9 -- topotests executed: 31/33 pass, 1 real bug found (unfixed)
+
+Ran the full topotest suite (all 4 BGP-LS directories: `bgp_link_state`,
+`bgp_link_state_bgp_fabric`, `bgp_link_state_srv6`,
+`bgp_link_state_bgp_fabric_srv6`) against the built branch. This
+required environment setup beyond the build itself (none of it
+committed to this branch -- all machine-local):
+- Created the standard `frr` system user + `frr`/`frrvty` groups
+  (topotest's own diagnostics require these; matches
+  `docker/ubuntu-ci/Dockerfile`'s own setup).
+- Reconfigured with FHS-standard paths (`--prefix=/usr
+  --sysconfdir=/etc/frr --localstatedir=/var`) instead of the
+  autoconf-default `/usr/local/...` used for the earlier build-only
+  verification -- topotest hardcodes `/var/run/<routertype>` for
+  pidfiles/sockets, so this reconfigure+`make install` was required
+  before any daemon would start under the test harness. Rebuilt clean
+  afterward (0 errors, 0 warnings, same as before).
+- Pointed `tests/topotests/pytest.ini`'s `frrdir` at `/usr/lib/frr`
+  for the run, then reverted that edit afterward (a machine-local
+  path setting, not something that belongs in this branch's history).
+
+**Result: 31 passed, 2 skipped (memory-leak tests, disabled by
+default, one per SRv6 suite), 2 failed** -- reproduced twice,
+identically:
+- `bgp_link_state/` -- **18/18 passed** (full ISIS-to-BGP-LS pipeline:
+  convergence, capability negotiation, Node/Link/Prefix NLRIs, static
+  route add/remove v4+v6, interface address add/remove v4+v6, link
+  shutdown/no-shutdown, peer deactivate/reactivate).
+- `bgp_link_state_bgp_fabric/` -- **all passed** (BGP-only-fabric
+  topology export).
+- `bgp_link_state_srv6/` -- **`test_bgp_ls_producer` FAILED.** BGP-LS
+  Node and Prefix NLRIs (including SRv6 locator prefixes) are present
+  and correct on the producer's own local table; every BGP-LS **Link**
+  NLRI is missing.
+- `bgp_link_state_bgp_fabric_srv6/` -- **`test_bgp_ls_srv6_export`
+  FAILED**, same symptom (missing Link/SID NLRIs) on the route
+  reflector.
+
+**Root-cause investigation** (live `nsenter`+`vtysh` inspection of the
+running topology, plus temporary non-committed `zlog_debug()`
+instrumentation in `isis_te.c`, reverted before the final clean
+rebuild -- `git diff` confirmed clean after revert):
+- ISIS adjacencies form correctly and `distribute link-state` /
+  `isis_instance_distribute_link_state_modify()` (commit `dcf4a32ed1`)
+  works as intended -- `IS_MPLS_TE(area->mta)` is true throughout, so
+  `isis_te_lsp_event()`'s gate is not the problem.
+- `lsp_to_edge_cb()` **does** run and **does** create real `ls_edge`
+  objects with `export=1` for at least 4 distinct edges observed
+  directly, including edges with complete addressing (both
+  `LS_ATTR_LOCAL_ADDR`+`LS_ATTR_NEIGH_ADDR` for IPv4, and separately
+  `LS_ATTR_LOCAL_ADDR6`+`LS_ATTR_NEIGH_ADDR6` for IPv6) that should
+  satisfy `bgp_ls_link_valid()` in `bgp_ls_ted.c`.
+- ISIS emits the IPv4-addressed and IPv6-addressed views of the same
+  physical link as **separate** `isis_lsp_iterate_is_reach()` calls
+  (once per MT-ID, MT0 vs MT2) with different sub-TLV sets, which
+  `get_edge()`'s key computation (address-family priority: v4 &gt; v6 &gt;
+  link-ID) turns into **two distinct `ls_edge` objects** for what a
+  human would call one link. This matches `struct ls_edge_key`'s
+  actual (unchanged) shape -- confirmed against the real upstream diff
+  for `2d39e314a5` ("lib: Add MT-ID support to link-state data model"),
+  which adds `mt_id` only as metadata on `ls_attributes`, never as
+  part of the edge key -- so this dual-object behavior is upstream's
+  own design, not something Stage A introduced.
+- Despite isisd successfully exporting seemingly-valid edges, **zero**
+  ever reach bgpd's final BGP-LS RIB. The remaining suspects, not yet
+  conclusively isolated: the reverse-edge destination-pairing logic in
+  `bgp_ls_ted.c` (`ls_find_edge_by_destination()` / the "skip edge
+  add/update without destination" self-healing path), possibly
+  interacting with the dual v4/v6-keyed-edge behavior above (if one
+  direction of a link pairs via its v4-keyed edge while the other
+  pairs via its v6-keyed edge, `edge->destination` may never resolve
+  on either).
+- This reproduced identically across 3 separate live runs (including
+  the final clean-binary run used for the numbers above), so it is a
+  real, deterministic bug -- not test flakiness or a leftover artifact
+  of live debugging.
+
+**Not yet fixed.** This needs either instrumented debug logging added
+*before* topology bring-up (via the test's own router config, not live
+`vtysh` after the fact -- toggling debug flags live doesn't retroactively
+show already-happened events, and toggling `distribute link-state`
+off/on does not force a fresh full TED walk) or careful static tracing
+through `bgp_ls_ted.c`'s pairing logic against the dual-edge-object
+behavior above. Scoped as a distinct, real functional gap -- separate
+from (and more concerning than) any of the risk items already listed --
+and should be resolved before Stage B, since it means **SRv6 Link and
+SID topology data does not currently propagate through BGP-LS at all**,
+which is a core piece of what this whole backport exists to deliver.
