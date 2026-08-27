@@ -159,3 +159,37 @@ nothing here to revisit later). Queue popped without a Stage A
 commit.
 
 25 of 56 "touches-existing" commits remain.
+
+## Progress checkpoint 4
+
+Commits 34-42 landed: `614c5177d8` (malformed TLV handling, clean),
+`f018e3f34a` (SRv6 SID Structure storage in link-state objects, clean),
+`78773fb672` (isisd export SRv6 SID Structure into TE attrs, hand-
+resolved), `4aac5094b4` (isisd distribute-link-state CLI/YANG/NB knob,
+hand-resolved across 8 files), `bd5b1bde53`/`4cbe1d243f` (both clean),
+`290221668b` (bgp_attr_get_ls_attr/bgp_attr_set_ls_attr getter/setter,
+hand-resolved -- mechanical), `8ab6851905` (clean), `8d8c4899eb`
+(remove redundant BGP-LS NLRI forward decls, hand-resolved trivially),
+`052151310891`/`32254aaffc` (MT-ID support in link-state model +
+IS-IS export, clean then hand-resolved).
+
+**Second deliberate exclusion**: `9e1e665a50` ("bgpd: Move nhc
+attribute from attr to attr_extra") -- a 17-file architectural
+refactor (bgp_attr.c/h, bgp_conditional_adv.c, bgp_evpn.c,
+bgp_evpn_mh.c, bgp_fsm.c, bgp_memory.c/h, bgp_mpath.c, bgp_mplsvpn.c,
+bgp_nhc.c, bgp_route.c, bgp_routemap.c, bgp_srv6.c, bgp_updgrp_adv.c,
+bgp_zebra.c, rfapi/vnc_import_bgp.c) introducing an `attr_extra`
+sub-struct and moving the `nhc` field into it, for memory-footprint
+reasons unrelated to BGP-LS. None of the 17 files is bgp_ls.c/
+bgp_ls_nlri.c/bgp_ls_ted.c, and grep confirms none of those 3 files
+reference attr_extra/bgp_attr_get_nhc/attr->nhc. `bgp_srv6.c` doesn't
+even exist in our 10.5.4-era tree (split out later), which is itself
+a sign this diff assumes a much later tree shape than ours. Same
+rationale as the `6677220e92` peer_connection exclusion: caught by
+the tight token filter only incidentally (message doesn't mention
+BGP-LS; likely diff-context coincidence in bgp_attr.c/bgp_route.c
+near existing ls_attr code), carries zero BGP-LS feature semantics,
+and replaying it would add large unrelated risk for zero functional
+gain. Skipped outright. Queue popped without a Stage A commit.
+
+24 of 56 "touches-existing" commits remain.
