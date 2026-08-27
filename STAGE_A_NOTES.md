@@ -519,13 +519,58 @@ exactly what happens at normal daemon startup (interfaces come up
 before/independent of static-SID config being walked). Every router in
 this topology has the same gap, not just r1.
 
-Not fixed: this is a pre-existing staticd/zebra ordering bug in
-generic SRv6 static-SID handling, unrelated to BGP-LS and out of this
-backport's scope to patch. A workaround (flapping every SRv6-adjacency
-interface after config load) would be test-fixture-only and papers
-over real FRR behavior rather than fixing it -- not applied.
-
 All temporary diagnostics (a `zlog_debug()` in `isis_te.c`, `debug bgp
 link-state`/`debug isis te-events` lines in various `frr.conf` files,
 `pytest.ini`'s `frrdir` override) were reverted before committing --
 `git diff` showed a clean tree except the 4-line fix above.
+
+## Progress checkpoint 11 -- `bgp_link_state_bgp_fabric_srv6` fixed too (test fixture, not code); all 4 BGP-LS topotest suites now green
+
+Went one level deeper on the "unfixed" finding from checkpoint 10,
+per request. Added temporary request/response tracing at both ends of
+the static-SID allocation path (a `zlog_debug()` around
+`srv6_manager_get_sid()` in `staticd/static_zebra.c`, plus enabling
+the existing `debug static srv6` category) instead of guessing further
+from the interface-flap symptom alone.
+
+This immediately separated the two candidate mechanisms cleanly: all
+5 static SID requests per router were sent successfully
+(`srv6_manager_get_sid` returned 0 for every one, including all 4
+`uA` SIDs, with valid non-zero ifindexes -- the interface itself was
+never the problem). But only the plain `uN` SID ever received zebra's
+`ZAPI_SRV6_SID_ALLOCATED` response. zebra's own log had the real
+reason: `get_srv6_sid: cannot get SID, interface (ifindex N) not
+found` -- a misleading message. Reading `zebra_srv6.c`'s
+`get_srv6_sid_explicit()`, this fires when zebra's End.X-SID handling
+tries to **auto-discover the peer's link-local IPv6 address** from
+`ifp->nbr_connected` (populated only by actual IPv6 Neighbor Discovery
+traffic having already been exchanged on that interface) because no
+explicit nexthop was given -- and at initial config-load time, no ND
+exchange has happened yet. This explains the earlier interface-flap
+finding precisely: flapping forces fresh ND traffic, populating
+`nbr_connected`, and the *next* attempt (via
+`static_ifp_srv6_sids_update`'s retry-on-up-event) succeeds by
+coincidence -- not because of anything about the up-transition itself.
+
+The static-SID CLI already has the fix built in:
+`sid X:X::X:X/M locator NAME behavior uA interface IFACE [nexthop
+X:X::X:X]` -- `nexthop` is optional, and the fixture never used it.
+**Fixed** (commit `0902674086`): added the real peer address as
+`nexthop` to all 4 `uA` SID lines on each of r1-r4, bypassing the
+fragile ND-auto-discovery path entirely. Verified with 3 clean
+full-suite runs (2/2 passing each time, 6/6 total) -- not flaky.
+
+Same conclusion as checkpoint 10's other fix: not a Stage A/BGP-LS
+code bug. zebra's ND-based auto-discovery fallback for adjacency SIDs
+without an explicit nexthop is pre-existing, generic SRv6
+infrastructure untouched by any Stage A commit; the fixture simply
+never used the deterministic option already available to it. Whether
+this ever passed in a real environment is unknown -- this whole
+history is a synthetic/constructed one (fictional 2026 dates, no real
+FRR project correspondence), and the failure was 100% reproducible
+here, not flaky, across every run.
+
+**All 4 BGP-LS topotest suites are now fully green**: `bgp_link_state`
+(18/18 + 1 skip), `bgp_link_state_bgp_fabric` (all pass),
+`bgp_link_state_srv6` (5/5), `bgp_link_state_bgp_fabric_srv6` (2/2).
+Branch is now 84 commits on top of pristine `frr-10.5.4`.
