@@ -449,14 +449,83 @@ rebuild -- `git diff` confirmed clean after revert):
   real, deterministic bug -- not test flakiness or a leftover artifact
   of live debugging.
 
-**Not yet fixed.** This needs either instrumented debug logging added
-*before* topology bring-up (via the test's own router config, not live
-`vtysh` after the fact -- toggling debug flags live doesn't retroactively
-show already-happened events, and toggling `distribute link-state`
-off/on does not force a fresh full TED walk) or careful static tracing
-through `bgp_ls_ted.c`'s pairing logic against the dual-edge-object
-behavior above. Scoped as a distinct, real functional gap -- separate
-from (and more concerning than) any of the risk items already listed --
-and should be resolved before Stage B, since it means **SRv6 Link and
-SID topology data does not currently propagate through BGP-LS at all**,
-which is a core piece of what this whole backport exists to deliver.
+**Not yet fixed** (at the time this checkpoint was written). See
+checkpoint 10 below -- resolved for `bgp_link_state_srv6`, root-caused
+but not fixed for `bgp_link_state_bgp_fabric_srv6`.
+
+## Progress checkpoint 10 -- `bgp_link_state_srv6` fixed (test fixture, not code); `bgp_link_state_bgp_fabric_srv6` root-caused, unfixed
+
+Picked the investigation back up with debug logging placed *before*
+topology bring-up this time (directly in the test routers' `frr.conf`
+files, temporarily, reverted after) instead of live `vtysh` toggling --
+the key lesson from checkpoint 9's dead ends. This surfaced the full
+picture immediately: bgpd's own `bgp_ls_process_message` debug line
+showed every ATTR (edge) message hitting `Skip edge add/update without
+destination`, every single time, for all 5 messages received.
+
+Traced `ls_find_edge_by_destination()`'s reverse-edge-pairing logic
+(`get_edge_key()`, `edge_cmp()`) and found it structurally correct --
+the real gap was one level up. Added a temporary diagnostic to
+`lsp_to_edge_cb()` printing which router's LSP was being processed
+(`vertex->node->name`) alongside the attribute result, and found a
+stark, 100%-reproducible split: r1's own extended-IS entries succeeded
+22/24 times; every single one of the other 105 entries from r2/r3/r4/r5's
+LSPs (across the whole run) failed. Confirmed directly against raw LSP
+content via `show isis database detail` (core ISIS display code, zero
+BGP-LS or Stage A involvement): r1's LSP carries full
+`Local Interface IP Address(es)` / `Remote Interface IP Address(es)` /
+bandwidth sub-TLVs on its extended reachability entries; r2's LSP
+carries *none* -- same interface config (`link-params` on every ISIS
+interface), same SRv6 locator setup, only difference is r1 alone has
+`distribute link-state` configured.
+
+Root cause: `isis_link_params_update()` (pre-existing ISIS code,
+`isisd/isis_te.c`, never touched by any Stage A commit) only populates
+a circuit's TE address/bandwidth sub-TLVs when *that router's own*
+`IS_MPLS_TE(circuit->area->mta)` is active. Since `distribute
+link-state` is what activates `mta` (via `isis_mpls_te_create()`), a
+router that never configures it never advertises its own interface
+addresses into its LSP at all -- meaning no other router can ever learn
+them, and the bidirectional edge-pairing BGP-LS needs can never
+complete for that router's links. The topotest fixture only configured
+`distribute link-state` on r1 (the designated "producer"), assuming
+one router's setting would suffice; it doesn't -- every router whose
+links should be visible needs it.
+
+**Fixed** (commit `64aa609e6f`): added `distribute link-state` to
+r2/r3/r4/r5's `frr.conf`, matching r1. Verified with a full clean run
+of `bgp_link_state_srv6/`: **5/5 pass** (was 4/5, `test_bgp_ls_producer`
+failing). This is a test-fixture gap, not a Stage A code bug -- no
+production code changed.
+
+**`bgp_link_state_bgp_fabric_srv6` -- root-caused, still unfixed,
+different bug.** This topology has no ISIS at all (pure BGP-only
+fabric). Its failure mode is different: the Link NLRI *is* present in
+the output, but its `linkStateAttrs` (the expected `srv6EndxSids` list)
+is missing. Traced to `bgp_ls_refresh_bgp_link_endx_attrs()` logging
+"peer ... refresh with 0 End.X SID(s)" -- the static End.X (`uA`
+behavior, uSID-compressed adjacency) SIDs configured under
+`segment-routing / srv6 / static-sids` never reach zebra's SID table at
+all (confirmed directly via `show segment-routing srv6 sid`: only the
+plain `uN` SID installs; the two interface-scoped `uA` SIDs never
+appear). Manually flapping the tied interface (`shutdown`/`no shutdown`)
+causes the missing SIDs to install immediately, confirming the cause:
+`static_ifp_srv6_sids_update()` (`staticd/static_srv6.c`, pre-existing,
+generic SRv6 static-SID infrastructure, not part of any Stage A commit)
+only installs an interface-scoped static SID on an interface
+up-*transition event* -- there is no "interface is already up, install
+now" path for a SID added after the interface came up, which is
+exactly what happens at normal daemon startup (interfaces come up
+before/independent of static-SID config being walked). Every router in
+this topology has the same gap, not just r1.
+
+Not fixed: this is a pre-existing staticd/zebra ordering bug in
+generic SRv6 static-SID handling, unrelated to BGP-LS and out of this
+backport's scope to patch. A workaround (flapping every SRv6-adjacency
+interface after config load) would be test-fixture-only and papers
+over real FRR behavior rather than fixing it -- not applied.
+
+All temporary diagnostics (a `zlog_debug()` in `isis_te.c`, `debug bgp
+link-state`/`debug isis te-events` lines in various `frr.conf` files,
+`pytest.ini`'s `frrdir` override) were reverted before committing --
+`git diff` showed a clean tree except the 4-line fix above.
