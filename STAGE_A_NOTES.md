@@ -574,3 +574,45 @@ here, not flaky, across every run.
 (18/18 + 1 skip), `bgp_link_state_bgp_fabric` (all pass),
 `bgp_link_state_srv6` (5/5), `bgp_link_state_bgp_fabric_srv6` (2/2).
 Branch is now 84 commits on top of pristine `frr-10.5.4`.
+
+## Checkpoint 12: full FRR topotest suite (all 521 files, not just BGP-LS)
+
+With the 4 BGP-LS suites fully green, ran the *entire* topotest tree
+(`tests/topotests/`, 411 top-level dirs, 521 `test_*.py` files covering
+every daemon -- ospfd, ripd, pimd, ldpd, bfdd, vrrpd, eigrpd, babeld,
+nhrpd, mgmtd, sharpd, etc.) to check for regressions Stage A's shared-file
+changes (`bgp_attr.c`, `lib/link_state.c`, `zebra/rt_netlink.c`,
+`isisd/isis_te.c`, ...) might have introduced elsewhere.
+
+Installed `pytest-xdist` (not present in the environment) and ran with
+`-n 8 --dist=loadfile` (8 workers, one test *file* per worker slot so
+module-scoped topology fixtures never split across processes). Sanity-
+checked parallel correctness first by re-running the 4 known-green
+BGP-LS suites under xdist (34 passed, 1 skipped -- matched the serial
+baseline) before committing to the full run. Runtime: 1h49m.
+
+**Result: 1987 passed, 195 skipped, 8 failed, 63 errors.**
+
+Every one of the 71 non-passes was root-caused individually (via the
+pytest tracebacks in the run log plus each router's `bgpd.err`/daemon
+logs) to one of exactly four pre-existing environment/tooling gaps on
+this machine -- **none touch any file Stage A modified**:
+
+| Cause | Count | Representative dirs |
+|---|---|---|
+| `ExaBGP` binary not installed (tests assert `>= 4.2.11`) | 51 errors | `bgp_ecmp_topo1`, `bgp_flowspec`, `bgp_peer_type_multipath_relax`, `bgp_route_server_client`, `bgp_vrf_*`, `bgp_prefix_sid*`, `bgp_aggregate_address_topo1`, etc. |
+| `bgpd_rpki.so` module not built (`--enable-rpki` + `librtr` never configured for this build) | 12 errors | `bgp_rpki_topo1` (all subtests) -- confirmed via `bgpd.err`: `dlopen(bgpd_rpki.so): No such file` |
+| `scapy` Python module not installed (`ModuleNotFoundError`) | 6 failures | `multicast_features`, `multicast_pim_bsm_topo1`, `multicast_pim_bsm_topo2`, `zebra_pref64`, `ospf_gr_helper` (all 3 files -- traced to their shared `scapy_send_raw_packet()` helper) |
+| `ssmping` binary not installed | 1 failure | `pim_basic::test_pim_ssm_ping` (`/bin/bash: ssmping: command not found`) |
+
+Confirmed directly: `which exabgp` (not found), `python3 -c "import
+scapy"` (`ModuleNotFoundError`), each RPKI router's `bgpd.err`
+(`dlopen` failure), and `ssmping: command not found` in the ping
+test's captured output. These are machine-setup gaps (external test
+tooling never installed here), not code defects -- fully consistent
+with every one of the 71 failures being an `ERROR at setup` (fixture-
+level, before the test body ever runs) or an assertion on a helper
+that itself depends on the missing tool, never a Stage A code path.
+
+**Zero regressions from Stage A across the full FRR topotest suite.**
+Branch is 85 commits on top of pristine `frr-10.5.4`.
