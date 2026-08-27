@@ -302,3 +302,72 @@ exists anywhere in the range beyond what's now landed. **Test/doc
 coverage is confirmed complete**: all 15 topotest commits, both doc
 commits, and this 1 recovered unit-test hunk are now in the branch
 (76 total commits).
+
+## Progress checkpoint 8 -- build verification: 2 real gaps found, both fixed, clean build achieved
+
+Ran `./bootstrap.sh && ./configure --enable-multipath=514 --enable-fpm
+--enable-sharpd --enable-ospfapi --enable-pcre2posix --disable-protobuf
+--disable-zeromq --disable-doc && make -j$(nproc)` against the full
+branch (this was the top-ranked open risk in the published ledger --
+"nothing has been compiled"). Found and fixed 2 real, distinct
+categories of forward-drift that the scoped-diff `git apply --check`
+methodology structurally cannot catch, both surfaced only by an actual
+compiler pass:
+
+1. **New-function forward-drift** (commit `34b78ea3d5`, follow-up to
+   `2dedcfd1f6` and `828249f125`): `bgp_attr_ls()` referenced
+   `args->connection`/`connection->curr` and `bgp_attr_set_ls_attr()`
+   called `bgp_attr_set()`/`bgp_attr_unset()` -- all four things exist
+   in upstream's tree at the point those commits landed, but not in
+   our 10.5.4 base (a still-earlier point in the same incremental
+   peer_connection migration whose *later* step, `6677220e92`, Stage A
+   already excluded; and a generic attr-flag helper introduced
+   independently of BGP-LS). `git apply --check` cannot catch this
+   class of bug: the added code is entirely new lines with no
+   pre-existing context to diff against, so nothing about the patch
+   *looks* wrong until the compiler resolves the symbols. Fixed by
+   matching the exact pattern already used one function up
+   (`bgp_attr_otc()`) and throughout the file.
+
+2. **Missing cross-cutting dependency** (commit `2a6467cdd5`,
+   backport of upstream `85ed407320`, "*: Provide interface when
+   installing/uninstalling SRv6 uA SIDs"): `bgp_ls.c`'s static SRv6
+   END-SID-export path (`bgp_ls_upsert_static_endx_sid()`, from Stage
+   A commit `c48448f8c3`) uses `seg6local_context.ifindex`, a field
+   that plain upstream added in a **non-BGP-LS** commit dated
+   2025-10-25 -- entirely outside Stage A's BGP-LS-token candidate
+   filter by design, since it isn't BGP-LS-related and correctly never
+   matched. This is the inverse failure mode of the two commits Stage
+   A deliberately excluded (which matched the filter but had no real
+   dependency); this one has a real dependency but never matched the
+   filter at all. Backported as a small, self-contained 4-file/16-line
+   commit (`isisd/isis_zebra.c`, `lib/srv6.h`, `staticd/static_zebra.c`,
+   `zebra/rt_netlink.c`) -- 2 files applied clean, `zebra/rt_netlink.c`
+   hand-placed at its real anchors (VRFTABLE handling and
+   `req_size`-vs-`buflen` naming differ from upstream's context, but
+   the insertion points matched).
+
+After both fixes: **a full clean build (`make clean && make -j$(nproc)`)
+completes with 0 errors and 0 warnings**, producing all 6 touched-daemon
+binaries (`bgpd`, `isisd`, `zebra`, `staticd`, `pbrd`, `vtysh`).
+`bgpd --version`/`isisd --version` run correctly and report `10.5.4`.
+A config-syntax smoke test (`bgpd -S -C -f <conf>` with `router bgp
+65001` / `address-family link-state link-state` / `distribute
+bgp-fabric-link-state`) parses the new BGP-LS CLI grammar without
+error, failing only later at socket bind (port 179 needs root/
+CAP_NET_BIND_SERVICE, and `/usr/local/var/{lib,run}/frr` don't exist
+on this dev machine) -- an environment/install limitation, not a code
+defect.
+
+**Branch is now 79 commits on top of pristine frr-10.5.4, and
+verified to build clean.** This closes out the two highest-severity
+items in the risk assessment (compile verification; the
+`85ed407320` dependency was not previously known and is a new,
+resolved finding). The `SAFI_BGP_LS=8`/`SAFI_SRPOLICY=8` collision
+and the peer-flag bit cross-check against the 156-patch SONiC/Nexthop
+branch remain open, unchanged, ahead of Stage B.
+
+**Caveat**: this is a build/link/CLI-grammar verification only, not a
+runtime/protocol-correctness verification -- the topotest suite has
+still not been *executed* (no BGP sessions have actually been brought
+up and exchanged BGP-LS NLRIs). That remains open.
