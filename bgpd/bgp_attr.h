@@ -676,9 +676,9 @@ static inline void bgp_attr_set_ls_attr(struct attr *attr, struct bgp_ls_attr *l
 	attr->ls_attr = ls_attr;
 
 	if (ls_attr)
-		bgp_attr_set(attr, BGP_ATTR_LINK_STATE);
+		SET_FLAG(attr->flag, ATTR_FLAG_BIT(BGP_ATTR_LINK_STATE));
 	else
-		bgp_attr_unset(attr, BGP_ATTR_LINK_STATE);
+		UNSET_FLAG(attr->flag, ATTR_FLAG_BIT(BGP_ATTR_LINK_STATE));
 }
 
 static inline struct bgp_attr_encap_subtlv *

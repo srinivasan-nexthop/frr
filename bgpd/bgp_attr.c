@@ -3958,8 +3958,7 @@ otc_ignore:
 /* BGP-LS attribute (rfc9552) */
 static enum bgp_attr_parse_ret bgp_attr_ls(struct bgp_attr_parser_args *args)
 {
-	struct peer_connection *const connection = args->connection;
-	struct peer *const peer = connection->peer;
+	struct peer *const peer = args->peer;
 	struct attr *const attr = args->attr;
 	int ret;
 	struct bgp_ls_attr *ls_attr;
@@ -3969,7 +3968,7 @@ static enum bgp_attr_parse_ret bgp_attr_ls(struct bgp_attr_parser_args *args)
 
 	ls_attr = bgp_ls_attr_alloc();
 
-	ret = bgp_ls_parse_attr(connection->curr, args->length, ls_attr);
+	ret = bgp_ls_parse_attr(peer->curr, args->length, ls_attr);
 	if (ret != 0) {
 		bgp_ls_attr_free(ls_attr);
 		/*
@@ -3987,7 +3986,7 @@ static enum bgp_attr_parse_ret bgp_attr_ls(struct bgp_attr_parser_args *args)
 	return BGP_ATTR_PARSE_PROCEED;
 
 ls_attr_ignore:
-	stream_forward_getp(connection->curr, args->length);
+	stream_forward_getp(peer->curr, args->length);
 
 	return bgp_attr_ignore(peer, args->type);
 }
