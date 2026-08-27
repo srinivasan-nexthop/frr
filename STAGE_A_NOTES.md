@@ -193,3 +193,38 @@ and replaying it would add large unrelated risk for zero functional
 gain. Skipped outright. Queue popped without a Stage A commit.
 
 24 of 56 "touches-existing" commits remain.
+
+## Progress checkpoint 5 -- "touches-existing" queue complete
+
+Commits 43-56 landed: `f302c9fc4f`/`1bcfef7ecd` (clean), `f0eb283a3c`
+(bgpd: export static SRv6 END SIDs as BGP-LS SRv6 SID NLRIs, hand-
+resolved -- bgp_redistribute_add() gained seg6local_action/ctx params,
+bgp_ls_handle_route_add/delete() hooked in), `4c471588630` (clean),
+`27f783c270` (bgpd: originate/withdraw SRv6 locator prefixes as
+BGP-LS Prefix NLRIs, hand-resolved across bgp_vty.c/bgp_zebra.c),
+`4b88d5ad8a`/`e4ea5850cf` (clean).
+
+**Third deliberate exclusion**: `87fe21fda9` ("FRR Release 10.7.0") --
+the upstream release-tagging commit itself. Its only content is
+configure.ac's version string, "10.7.0-dev" -> "10.7.0" (1 line
+changed). It only matched our BGP-LS filter because its changelog
+message lists "BGP-LS SRv6 extensions" as a highlight; the diff has
+zero functional content. Skipped outright -- not a code commit at
+all. Queue popped without a Stage A commit.
+
+**The 56-commit "touches-existing" queue is now fully processed**: 53
+commits landed as Stage A commits (44 clean via git apply, 9 hand-
+resolved), 3 deliberately excluded as unrelated-refactor/release-tag
+false positives (`6677220e92` peer_connection, `9e1e665a50` attr_extra/
+nhc, `87fe21fda9` release tag) with zero BGP-LS functional content in
+each case, verified by grep against bgp_ls*.c/h before exclusion.
+Combined with commit 1 (verbatim copy of the 6 new bgp_ls*.c/h files,
+subsuming the 107 new-file-only commits), Stage A's code-only 163-commit
+scope is complete.
+
+**Remaining work**: the 15 test-only and 2 doc-only commits deferred
+at the start (see "Method" above) have not yet been folded in --
+revisit with the user before considering Stage A fully done. Stage B
+(export as a few logical patches, apply onto the 156-SONiC-patch
+branch, resolve the SAFI_BGP_LS=8/SAFI_SRPOLICY=8 collision) has not
+started.
