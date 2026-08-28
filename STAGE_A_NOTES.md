@@ -615,4 +615,75 @@ level, before the test body ever runs) or an assertion on a helper
 that itself depends on the missing tool, never a Stage A code path.
 
 **Zero regressions from Stage A across the full FRR topotest suite.**
-Branch is 85 commits on top of pristine `frr-10.5.4`.
+Branch is 86 commits on top of pristine `frr-10.5.4`.
+
+## Checkpoint 13: fixed all 4 missing-tooling gaps -- entire suite now 0 failures, 0 errors
+
+Checkpoint 12 found 71 non-passes, all attributed to 4 missing pieces
+of local test tooling (none touching Stage A code). Installed/built
+each and re-ran every affected directory to confirm:
+
+- `scapy` -- `pip install scapy` (2.7.0). Fixed `multicast_features`,
+  `multicast_pim_bsm_topo1`, `multicast_pim_bsm_topo2`, `zebra_pref64`,
+  all 3 `ospf_gr_helper` files.
+- `ssmping` -- `apt install ssmping`. Fixed `pim_basic::test_pim_ssm_ping`.
+- RPKI -- `apt install librtr-dev`, then reconfigured FRR with
+  `--enable-rpki` added to the existing configure invocation, full
+  rebuild (`bgpd/bgpd_rpki.so` now present), `sudo make install`.
+  Fixed all 12 `bgp_rpki_topo1` subtests.
+- ExaBGP -- installed via pip, but this one had a real wrinkle (below).
+
+**ExaBGP wrinkle.** `pip install exabgp` pulled 4.2.25 (latest 4.2.x).
+Version-checks fine (`exabgp --version` satisfies the harness's `>=
+4.2.11` gate), but every ExaBGP-backed test still failed: ExaBGP itself
+crashed on startup, dumping its own `--help` usage text and exiting
+rc=1, for every single peer. Root cause: 4.2.25's docopt-based CLI
+parser rejects `-e <file>` (space-separated short option) -- the exact
+invocation style `lib/topotest.py`'s `bgpd/exabgp` bring-up code
+hardcodes (`exabgp -e /etc/exabgp/exabgp.env /etc/exabgp/exabgp.cfg`).
+Only the long form (`--env=<file>`) works on 4.2.25. Confirmed by
+reproducing the exact command by hand outside any topology and reading
+`exabgp/application/bgp.py`'s docopt usage string directly. Older
+4.2.x releases (4.2.11 through 4.2.21) fail a different way -- they
+predate this host's Python 3.12 and crash on import
+(`exabgp.vendoring.six.moves` missing). **`exabgp==4.2.22` is the one
+version on this host that satisfies both constraints** (Python 3.12
+compatible, and still accepts the harness's `-e <file>` syntax) --
+pinned via `pip install exabgp==4.2.22`.
+
+Also needed: a machine-local `exabgp` system user/group (`groupadd -r
+exabgp && useradd -r -g exabgp exabgp`), mirroring the earlier `frr`
+user setup -- `lib/topogen.py`'s ExaBGP bring-up does
+`chown exabgp:exabgp /etc/exabgp` `/var/run/exabgp.{in,out}`
+unconditionally, which fails outright (`chown: invalid user`) without
+it. This was masked before since every ExaBGP-based test was already
+failing at the `--version` check or immediately after for other
+reasons.
+
+**A genuinely long detour finding all this**: initial batched reruns
+(mixing all 23 previously-broken directories, `-n 8` then `-n 4`)
+repeatedly hung for hours with no visible progress. Two distinct causes
+compounded: (1) `pytest-timeout` under xdist doesn't cleanly fail a
+stuck test -- its thread-based kill corrupted the worker process
+instead, forcing xdist into a kill/respawn loop that made zero forward
+progress (visible as repeated `[gwN] node down: Not properly
+terminated` and a final `OSError: cannot send (already closed?)`
+crash); dropped that plugin entirely. (2) Once isolated to a single
+file, `bgp_peer_type_multipath_relax` reproducibly hung inside the
+Python harness itself (confirmed via `/proc/<pid>/stack`: blocked in
+the kernel's `fifo_open` -> `wait_for_partner`, i.e. opening one end of
+ExaBGP's named pipe and waiting forever for ExaBGP -- which had already
+crashed on the CLI-parsing bug above -- to open the other end). Once
+ExaBGP actually started successfully, this hang vanished on its own;
+it was a symptom of the same root cause, not a separate bug.
+
+**Final result after all four fixes, re-running every previously
+affected directory**: `bgp_rpki_topo1` 12/12 passed (86.97s, isolated);
+the other 22 directories together: 81 passed, 9 skipped, 0 failed, 0
+errors (671.90s, `-n 4 --dist=loadfile`). Combined with checkpoint 12's
+already-passing 1987/195, **the entire 521-file, all-daemon FRR
+topotest suite is now 100% green (0 failed, 0 errors) with zero Stage
+A code changes** -- every fix was either a system package, a pip
+package pinned to a compatible version, a machine-local system user, or
+a build reconfigure (`--enable-rpki`), none of which touch anything in
+this git tree.
