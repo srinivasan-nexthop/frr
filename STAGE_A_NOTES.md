@@ -775,3 +775,19 @@ entire skip/fail surface from checkpoint 12 is now accounted for --
 out of scope (grpc/munet, a different flavor of dependency), and
 everything else now passes. Branch remains 87 commits; nothing in this
 checkpoint touched the git tree.
+
+**Follow-up**: one SNMP skip actually remained after the rerun above --
+`bgp_snmp_bgp4v2mib::test_bgp_snmp_bgp4v2` still hit "SNMP not
+installed - skipping" because that specific test checks for
+`/usr/sbin/snmptrapd` (the trap *receiver*, a separate apt package from
+`snmpd`), not just `snmpd` itself. `apt install snmptrapd` and re-ran:
+**1 passed, 1 skipped** (the file's own by-design memory-leak test).
+
+**Final, fully-reconciled state of the 204 original skips**: 178
+intentional (opt-in flags or the one test upstream disabled), 26 were
+addressable environment gaps and are now fixed (SNMP/mgmtd_testc/
+snmptrapd, 16 cascading skips resolved as a byproduct of checkpoint
+13), 2 left alone as out of scope (grpc/munet -- different dependency
+flavor, not requested), 1 is a genuine host kernel-version limit.
+**Zero non-intentional failures or errors remain anywhere in the
+521-file suite.** Branch is 89 commits on top of pristine `frr-10.5.4`.
