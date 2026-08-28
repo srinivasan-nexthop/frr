@@ -791,3 +791,50 @@ snmptrapd, 16 cascading skips resolved as a byproduct of checkpoint
 flavor, not requested), 1 is a genuine host kernel-version limit.
 **Zero non-intentional failures or errors remain anywhere in the
 521-file suite.** Branch is 89 commits on top of pristine `frr-10.5.4`.
+
+## Checkpoint 15: closed the last two -- grpc_basic and log_config
+
+Asked to fix the remaining 2 out-of-scope skips too.
+
+**`log_config`** (`munet.testing.fixtures not available`): the vendored
+`tests/topotests/munet/testing/fixtures.py` already has everything the
+test needs (`rundir_module` is defined there) -- the `ImportError` was
+transitive, from that file's own `import pytest_asyncio` at the top,
+which wasn't installed. `pip install pytest-asyncio` fixed it -- except
+the obvious install command (`pip install pytest-asyncio`, no version
+pin) silently pulled `pytest 9.1.1` as a dependency, upgrading the
+system's `pytest 7.4.4` and putting the *entire* previously-100%-green
+suite at risk from an untested major-version jump. Caught immediately
+by checking `python3 -m pytest --version` right after the install, and
+fixed by explicitly re-pinning both: `pip install pytest==7.4.4
+pytest-asyncio==0.21.2` (0.21.x is the last line compatible with
+pytest 7.x). Confirmed `pytest 7.4.4` and `xdist` both intact afterward.
+
+**`grpc_basic`** (`cannot create or import gRPC proto modules`): needed
+three things. (1) `grpcio`/`grpcio-tools` (Python) -- straightforward
+pip install, the `.proto` source file was already present in the tree
+at `grpc/frr-northbound.proto`. (2) `libgrpc++-dev`/`libgrpc-dev`/
+`protobuf-compiler-grpc` (apt) plus reconfiguring FRR with
+`--enable-grpc` added to the existing configure invocation and a full
+rebuild (`lib/grpc.so` now present -- this one's a genuine C++
+northbound plugin, not just Python tooling). (3) A real environment
+wrinkle: `tests/topotests/lib/grpc-query.py` (the helper script the
+test shells out to) does `from munet.base import commander`, but as a
+standalone subprocess invocation it has no access to the *pytest
+process's* in-memory sys.path -- pytest only makes the vendored
+`munet` package importable inside its own process via rootdir
+insertion. Confirmed by running the script directly
+(`ModuleNotFoundError: No module named 'munet'`) and fixed by passing
+`PYTHONPATH=<tests/topotests dir>` in the environment when invoking
+pytest, which subprocesses inherit.
+
+**Result**: `grpc_basic` (5 tests) + `log_config` (2 tests): **7
+passed, 0 skipped, 0 failed, 0 errors.** Every one of the 204 skips
+from checkpoint 12 is now accounted for and every addressable one is
+fixed -- the only two items left in the entire 521-file suite are the 1
+genuine host kernel-version limitation and the 1 test upstream FRR
+itself disabled (`test_evpn_gateway_ip_basic_topo`, unrelated to Stage
+A or this environment). Branch remains 89 commits; nothing in this
+checkpoint touched the git tree (pytest/grpcio/pytest-asyncio are pip
+packages, the MIB/apt packages are machine-local, `--enable-grpc` is a
+configure flag, `PYTHONPATH` is an invocation-time env var).
